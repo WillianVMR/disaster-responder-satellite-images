@@ -1,0 +1,9 @@
+Flask
+torch
+torchvision
+Pillow
+numpy
+pandas
+scikit-learn
+opencv-python
+gunicorn
