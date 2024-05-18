@@ -5,12 +5,12 @@ import seaborn as sns
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications import DenseNet121
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import SGD
 from sklearn.metrics import confusion_matrix, classification_report, precision_score, recall_score, f1_score
-from PIL import Image
+from tensorflow.keras.preprocessing import image
 
 # Load configuration file
 with open('config.json') as config_file:
@@ -52,11 +52,11 @@ val_generator = val_datagen.flow_from_directory(
 )
 
 # Plotting the distribution of images in each category
-def plot_category_distribution(generator, title, filename):
+def plot_category_distribution(generator, title):
     class_counts = {k: 0 for k, v in generator.class_indices.items()}
     for _, labels in generator:
         for label in labels:
-            class_counts[list(generator.class_indices.keys())[np.argmax(label)]] += 1
+            class_counts[generator.class_indices_inv[np.argmax(label)]] += 1
 
     plt.figure(figsize=(10, 5))
     plt.bar(class_counts.keys(), class_counts.values())
@@ -65,16 +65,16 @@ def plot_category_distribution(generator, title, filename):
     plt.ylabel('Number of Images')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(filename)
+    plt.savefig('category_distribution.png')
     plt.show()
 
-plot_category_distribution(train_generator, "Distribution of Training Images", "category_distribution_train.png")
-plot_category_distribution(val_generator, "Distribution of Validation Images", "category_distribution_val.png")
+plot_category_distribution(train_generator, "Distribution of Training Images")
+plot_category_distribution(val_generator, "Distribution of Validation Images")
 
-# Load Pre-trained ResNet Model
-base_model = ResNet50(weights='imagenet', include_top=False)
+# Load Pre-trained DenseNet Model
+base_model = DenseNet121(weights='imagenet', include_top=False)
 
-# Add custom layers on top of ResNet50
+# Add custom layers on top of DenseNet121
 x = base_model.output
 x = GlobalAveragePooling2D()(x)
 x = Dense(1024, activation='relu')(x)
@@ -102,9 +102,9 @@ history = model.fit(
 )
 
 # Unfreeze some layers of the base model for fine-tuning
-for layer in base_model.layers[:143]:
+for layer in base_model.layers[:313]:  # Adjust the layer index if needed
     layer.trainable = False
-for layer in base_model.layers[143:]:
+for layer in base_model.layers[313:]:
     layer.trainable = True
 
 # Re-compile the model for fine-tuning
@@ -126,7 +126,7 @@ history_fine = model.fit(
 )
 
 # Save the model
-model.save('disaster_model_resnet50.h5')
+model.save('disaster_model_densenet121.h5')
 
 print('Training complete')
 

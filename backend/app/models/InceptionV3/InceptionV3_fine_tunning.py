@@ -5,7 +5,7 @@ import seaborn as sns
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications import InceptionV3
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import SGD
@@ -37,7 +37,7 @@ val_datagen = ImageDataGenerator(rescale=1./255)
 
 train_generator = train_datagen.flow_from_directory(
     train_dir,
-    target_size=(224, 224),
+    target_size=(299, 299),  # InceptionV3 default input size is 299x299
     batch_size=32,
     class_mode='categorical',
     shuffle=True
@@ -45,7 +45,7 @@ train_generator = train_datagen.flow_from_directory(
 
 val_generator = val_datagen.flow_from_directory(
     val_dir,
-    target_size=(224, 224),
+    target_size=(299, 299),  # InceptionV3 default input size is 299x299
     batch_size=32,
     class_mode='categorical',
     shuffle=False
@@ -71,10 +71,10 @@ def plot_category_distribution(generator, title, filename):
 plot_category_distribution(train_generator, "Distribution of Training Images", "category_distribution_train.png")
 plot_category_distribution(val_generator, "Distribution of Validation Images", "category_distribution_val.png")
 
-# Load Pre-trained ResNet Model
-base_model = ResNet50(weights='imagenet', include_top=False)
+# Load Pre-trained InceptionV3 Model
+base_model = InceptionV3(weights='imagenet', include_top=False)
 
-# Add custom layers on top of ResNet50
+# Add custom layers on top of InceptionV3
 x = base_model.output
 x = GlobalAveragePooling2D()(x)
 x = Dense(1024, activation='relu')(x)
@@ -102,9 +102,9 @@ history = model.fit(
 )
 
 # Unfreeze some layers of the base model for fine-tuning
-for layer in base_model.layers[:143]:
+for layer in base_model.layers[:249]:
     layer.trainable = False
-for layer in base_model.layers[143:]:
+for layer in base_model.layers[249:]:
     layer.trainable = True
 
 # Re-compile the model for fine-tuning
@@ -126,7 +126,7 @@ history_fine = model.fit(
 )
 
 # Save the model
-model.save('disaster_model_resnet50.h5')
+model.save('disaster_model_inceptionv3.h5')
 
 print('Training complete')
 

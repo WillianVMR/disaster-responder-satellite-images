@@ -1,0 +1,6 @@
+{
+    "data_dir": "/Users/willianribeiro/Documents/GitHub/disaster-responder-satellite-images/data/processed/disaster_images",
+    "train_dir": "/Users/willianribeiro/Documents/GitHub/disaster-responder-satellite-images/data/processed/disaster_images/train",
+    "val_dir": "/Users/willianribeiro/Documents/GitHub/disaster-responder-satellite-images/data/processed/disaster_images/test"
+  }
+  
