@@ -1,9 +1,9 @@
 Flask
-torch
-torchvision
+tensorflow # To run on mac OS use tensorflow-macos and tensorflow-metal with python 3.11
 Pillow
 numpy
 pandas
+seaborn
 scikit-learn
 opencv-python
 gunicorn
