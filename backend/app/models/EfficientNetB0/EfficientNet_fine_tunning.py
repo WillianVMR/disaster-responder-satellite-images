@@ -1,7 +1,5 @@
 import os
 import json
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.utils import Sequence
@@ -9,10 +7,9 @@ from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, Concatenate, Input
 from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers import SGD
+from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import CategoricalCrossentropy
-from sklearn.metrics import confusion_matrix, classification_report, precision_score, recall_score, f1_score
-from PIL import Image
+from tensorflow.keras.callbacks import ProgbarLogger
 import certifi
 
 # Set SSL_CERT_FILE environment variable to use certifi's certificate bundle
@@ -27,14 +24,30 @@ train_dir = config["train_dir"]
 val_dir = config["val_dir"]
 
 class DataGenerator(Sequence):
-    def __init__(self, image_dir, batch_size=8, target_size=(224, 224), shuffle=True):
+    def __init__(self, image_dir, batch_size=32, target_size=(224, 224), shuffle=True, mode='train'):
         self.image_dir = image_dir
         self.batch_size = batch_size
         self.target_size = target_size
         self.shuffle = shuffle
+        self.mode = mode
         self.image_pairs, self.labels = self._load_data()
         self.indexes = np.arange(len(self.image_pairs))
         self.on_epoch_end()
+
+        if mode == 'train':
+            self.datagen = tf.keras.preprocessing.image.ImageDataGenerator(
+                rescale=1./255,
+                shear_range=0.2,
+                zoom_range=0.2,
+                horizontal_flip=True,
+                rotation_range=10,
+                width_shift_range=0.2,
+                height_shift_range=0.2,
+                brightness_range=[0.8, 1.2],
+                fill_mode='nearest'
+            )
+        else:
+            self.datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
 
     def _load_data(self):
         image_pairs = []
@@ -52,6 +65,8 @@ class DataGenerator(Sequence):
                     with open(json_path, 'r') as f:
                         label_data = json.load(f)
                         labels.append(label_data)
+                else:
+                    print(f"Skipping {img_file} as the label file does not exist.")
 
         return image_pairs, labels
 
@@ -76,15 +91,19 @@ class DataGenerator(Sequence):
         y = np.empty((self.batch_size, *self.target_size, 5))
 
         for i, (pre_img_path, post_img_path) in enumerate(image_pairs):
-            pre_img = img_to_array(load_img(pre_img_path, target_size=self.target_size)) / 255.0
-            post_img = img_to_array(load_img(post_img_path, target_size=self.target_size)) / 255.0
+            pre_img = img_to_array(load_img(pre_img_path, target_size=self.target_size))
+            post_img = img_to_array(load_img(post_img_path, target_size=self.target_size))
             label_img = self._generate_label_image(labels[i])
 
-            X_pre[i,] = pre_img
-            X_post[i,] = post_img
+            if self.mode == 'train':
+                pre_img = self.datagen.random_transform(pre_img)
+                post_img = self.datagen.random_transform(post_img)
+
+            X_pre[i,] = pre_img / 255.0
+            X_post[i,] = post_img / 255.0
             y[i,] = label_img
 
-        return [X_pre, X_post], y
+        return {"pre_disaster_image": X_pre, "post_disaster_image": X_post}, y
 
     def _generate_label_image(self, label_data):
         label_img = np.zeros((*self.target_size, 5))
@@ -105,37 +124,8 @@ class DataGenerator(Sequence):
         return label_img
 
 # Data Generators
-train_generator = DataGenerator(train_dir)
-val_generator = DataGenerator(val_dir)
-
-# Plotting the distribution of images in each category
-def plot_category_distribution(generator, title, filename):
-    class_counts = [0] * 5
-    for labels in generator.labels:
-        for feature in labels['features']['lng_lat']:
-            if feature['properties']['feature_type'] == 'building':
-                subtype = feature['properties']['subtype']
-                if subtype == 'undamaged':
-                    class_counts[1] += 1
-                elif subtype == 'minor-damage':
-                    class_counts[2] += 1
-                elif subtype == 'major-damage':
-                    class_counts[3] += 1
-                elif subtype == 'destroyed':
-                    class_counts[4] += 1
-
-    plt.figure(figsize=(10, 5))
-    plt.bar(['No Building', 'Undamaged', 'Minor Damage', 'Major Damage', 'Destroyed'], class_counts)
-    plt.title(title)
-    plt.xlabel('Category')
-    plt.ylabel('Number of Images')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.show()
-
-plot_category_distribution(train_generator, "Distribution of Training Images", "category_distribution_train.png")
-plot_category_distribution(val_generator, "Distribution of Validation Images", "category_distribution_val.png")
+train_generator = DataGenerator(train_dir, mode='train')
+val_generator = DataGenerator(val_dir, mode='val')
 
 # Load Pre-trained EfficientNetB0 Model
 input_pre = Input(shape=(224, 224, 3), name='pre_disaster_image')
@@ -148,16 +138,8 @@ base_model = EfficientNetB0(weights='imagenet', include_top=False)
 features_pre = base_model(input_pre)
 features_post = base_model(input_post)
 
-# Print feature map sizes
-print("Features shape (pre-disaster):", features_pre.shape)
-print("Features shape (post-disaster):", features_post.shape)
-
 # Concatenate features
 concatenated_features = Concatenate(axis=-1)([features_pre, features_post])
-print("Concatenated features shape:", concatenated_features.shape)
-
-
-# Assuming the concatenated feature map shape is (None, 7, 7, 2048)
 
 # Add custom layers on top
 x = Conv2D(512, (3, 3), activation='relu', padding='same')(concatenated_features)
@@ -170,30 +152,36 @@ predictions = Conv2D(5, (1, 1), activation='softmax', padding='same')(x)
 
 model = Model(inputs=[input_pre, input_post], outputs=predictions)
 
-
 # Freeze the layers of the base model
 for layer in base_model.layers:
     layer.trainable = False
 
 # Compile the model
-model.compile(optimizer=SGD(learning_rate=0.001, momentum=0.9),
+model.compile(optimizer=Adam(learning_rate=0.0001),
               loss=CategoricalCrossentropy(),
               metrics=['accuracy'])
 
 # Training the model
-num_epochs = 25
+num_epochs = 1
 
-def custom_generator(data_generator):
-    while True:
-        for [X_pre, X_post], y in data_generator:
-            yield {"pre_disaster_image": X_pre, "post_disaster_image": X_post}, y
+# Adding ProgbarLogger to the callbacks (it displays the estimate time of accomplishment)
+progbar_logger = ProgbarLogger()
+
+# Verify generator outputs
+for data in train_generator:
+    print(f"X_pre shape: {data[0]['pre_disaster_image'].shape}, X_post shape: {data[0]['post_disaster_image'].shape}, y shape: {data[1].shape}")
+    print(f"Non-zero values in X_pre: {np.count_nonzero(data[0]['pre_disaster_image'])}")
+    print(f"Non-zero values in X_post: {np.count_nonzero(data[0]['post_disaster_image'])}")
+    print(f"Non-zero values in y: {np.count_nonzero(data[1])}")
+    break
 
 history = model.fit(
-    custom_generator(train_generator),
-    validation_data=custom_generator(val_generator),
+    train_generator,
+    validation_data=val_generator,
     steps_per_epoch=len(train_generator),
     validation_steps=len(val_generator),
-    epochs=num_epochs
+    epochs=num_epochs,
+    callbacks=[progbar_logger]
 )
 
 # Unfreeze some layers of the base model for fine-tuning
@@ -203,21 +191,22 @@ for layer in base_model.layers[230:]:
     layer.trainable = True
 
 # Re-compile the model for fine-tuning
-model.compile(optimizer=SGD(learning_rate=0.0001, momentum=0.9),
+model.compile(optimizer=Adam(learning_rate=0.00001),
               loss=CategoricalCrossentropy(),
               metrics=['accuracy'])
 
 # Fine-tuning the model
-fine_tune_epochs = 10
+fine_tune_epochs = 1
 total_epochs = num_epochs + fine_tune_epochs
 
 history_fine = model.fit(
-    custom_generator(train_generator),
-    validation_data=custom_generator(val_generator),
+    train_generator,
+    validation_data=val_generator,
     steps_per_epoch=len(train_generator),
     validation_steps=len(val_generator),
     epochs=total_epochs,
-    initial_epoch=history.epoch[-1]
+    initial_epoch=history.epoch[-1],
+    callbacks=[progbar_logger]
 )
 
 # Save the model
@@ -228,7 +217,7 @@ print('Training complete')
 # Evaluate the model and print confusion matrix
 y_true = []
 y_pred = []
-for [X_pre, X_post], y in custom_generator(val_generator):
+for [X_pre, X_post], y in val_generator:
     y_true.append(np.argmax(y, axis=-1))
     y_pred.append(np.argmax(model.predict({"pre_disaster_image": X_pre, "post_disaster_image": X_post}), axis=-1))
     if len(y_true) * val_generator.batch_size >= len(val_generator.labels):
@@ -273,4 +262,4 @@ def show_model_output(generator, model):
     plt.savefig('model_output_example.png')
     plt.show()
 
-show_model_output(custom_generator(val_generator), model)
+show_model_output(val_generator, model)
