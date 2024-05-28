@@ -7,3 +7,5 @@ seaborn
 scikit-learn
 opencv-python
 gunicorn
+opencv
+shapely
